@@ -29,7 +29,7 @@ public class PlayerController : MonoBehaviour
         aim = player_input_actions.Player.Aim;
         aim.Enable();
 
-        player_input_actions.Player.Jump.performed += DoJump;
+        player_input_actions.Player.Jump.started += DoJump;
         player_input_actions.Player.Jump.Enable();
     }
 
