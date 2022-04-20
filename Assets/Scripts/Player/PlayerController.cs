@@ -10,7 +10,6 @@ public class PlayerController : MonoBehaviour
     private InputAction movement;
     private InputAction aim;
 
-    private Rigidbody rb;
     private PlayerMovement p_movement;
     private PlayerCamera p_cam;
 
@@ -42,7 +41,6 @@ public class PlayerController : MonoBehaviour
 
     void Start()
     {
-        rb = gameObject.GetComponent<Rigidbody>();
         p_movement = gameObject.GetComponent<PlayerMovement>();
         //p_cam = gameObject.GetComponent<PlayerCamera>();
     }
@@ -56,18 +54,18 @@ public class PlayerController : MonoBehaviour
     private void FixedUpdate()
     {
         //Debug.Log("Movement Values: " + movement.ReadValue<Vector2>());
-        p_movement.Move(rb, movement.ReadValue<Vector2>());
+        p_movement.Move(movement.ReadValue<Vector2>());
     }
 
     private void DoJump(InputAction.CallbackContext obj)
     {
         //Debug.Log("Jump!");
-        p_movement.Jump(rb);
+        p_movement.Jump();
     }
 
     private void OnDrawGizmos()
     {
         Gizmos.color = Color.yellow;
-        Gizmos.DrawRay(transform.position, transform.forward * 3f);
+        //Gizmos.DrawRay(transform.position, transform.forward * 3f);
     }
 }
