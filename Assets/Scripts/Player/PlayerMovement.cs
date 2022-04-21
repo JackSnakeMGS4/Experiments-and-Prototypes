@@ -55,9 +55,13 @@ public class PlayerMovement : MonoBehaviour
     private float jump_height = 1f;
     [SerializeField] 
     private int max_air_jumps = 0;
+    [SerializeField, Range(0f, 100f)]
+    private float falling_rate = 0f;
 
     private int jump_phase;
     private int steps_since_last_jump;
+
+    Vector3 up_axis;
 
     private void Awake()
     {
@@ -105,7 +109,7 @@ public class PlayerMovement : MonoBehaviour
         }
         else
         {
-            contact_normal = Vector3.up;
+            contact_normal = up_axis;
         }
     }
 
@@ -126,16 +130,19 @@ public class PlayerMovement : MonoBehaviour
         {
             return false;
         }
-        if (!Physics.Raycast(rb.position, Vector3.down, out RaycastHit hit, probe_distance, probe_mask))
+        if (!Physics.Raycast(rb.position, -up_axis, out RaycastHit hit, probe_distance, probe_mask))
         {
             return false;
         }
-        if(hit.normal.y < GetMinDot(hit.collider.gameObject.layer))
+        float up_dot = Vector3.Dot(up_axis, hit.normal);
+        if(up_dot < GetMinDot(hit.collider.gameObject.layer))
         {
             return false;
         }
 
         contact_normal = hit.normal;
+
+        // Realign
         float dot = Vector3.Dot(velocity, hit.normal);
         if(dot > 0f)
         {
@@ -163,13 +170,13 @@ public class PlayerMovement : MonoBehaviour
         for (int i = 0; i < collision.contactCount; i++)
         {
             Vector3 normal = collision.GetContact(i).normal;
-            //on_ground |= normal.y >= min_ground_dot_product;
-            if (normal.y >= min_dot)
+            float up_dot = Vector3.Dot(up_axis, normal);
+            if (up_dot >= min_dot)
             {
                 ground_contact_count += 1;
                 contact_normal += normal;
             }
-            else if(normal.y > -0.01f)
+            else if(up_dot > -0.01f)
             {
                 steep_contact_count += 1;
                 steep_normal = normal;
@@ -182,7 +189,8 @@ public class PlayerMovement : MonoBehaviour
         if (steep_contact_count > 1)
         {
             steep_normal.Normalize();
-            if (steep_normal.y >= min_ground_dot_product)
+            float up_dot = Vector3.Dot(up_axis, steep_normal);
+            if (up_dot >= min_ground_dot_product)
             {
                 ground_contact_count = 1;
                 contact_normal = steep_normal;
@@ -197,6 +205,11 @@ public class PlayerMovement : MonoBehaviour
     {
         //gameObject.GetComponentInChildren<MeshRenderer>().material = _On_Ground ? on_ground_material : off_ground_material;
         gameObject.GetComponentInChildren<MeshRenderer>().material.SetColor("_BaseColor", Color.white * (ground_contact_count * 0.25f));
+    }
+
+    private void FixedUpdate()
+    {
+        up_axis = -Physics.gravity.normalized;
     }
 
     public void Move(Vector2 vector)
@@ -231,6 +244,18 @@ public class PlayerMovement : MonoBehaviour
         //Debug.DrawLine(transform.position, transform.position + velocity * 10f, Color.blue);
         rb.velocity = velocity;
 
+        #region Jump Floatiness
+        if(velocity.y >= 0)
+        {
+            rb.drag = 3.5f;
+        }
+        else if (velocity.y < 0f)
+        {
+            //rb.AddForce(Vector3.down * falling_rate, ForceMode.Acceleration);
+            rb.drag = 0.01f;
+        }
+        #endregion
+
         ClearState();
     }
 
@@ -249,6 +274,7 @@ public class PlayerMovement : MonoBehaviour
             //Allow new jump sequence after wall touch
             jump_phase = 0;
         }
+        //Multi-Jump condition
         else if (max_air_jumps > 0 && jump_phase <= max_air_jumps)
         {
             //Prevent Extra Air Jump Bug
@@ -256,7 +282,7 @@ public class PlayerMovement : MonoBehaviour
             {
                 jump_phase = 1;
             }
-            contact_normal = Vector3.up;
+            contact_normal = up_axis;
             jump_direction = contact_normal;
         }
         else
@@ -267,9 +293,10 @@ public class PlayerMovement : MonoBehaviour
 
         steps_since_last_jump = 0;
         jump_phase += 1;
-        float jump_speed = Mathf.Sqrt(-2f * Physics.gravity.y * jump_height);
+        float jump_speed = Mathf.Sqrt(2f * Physics.gravity.magnitude * jump_height);
 
         #region Slope-based Jump
+        jump_direction = (jump_direction + up_axis).normalized;
         float aligned_speed = Vector3.Dot(velocity, jump_direction);
         //Debug.Log(contact_normal);
         if (aligned_speed > 0f)
