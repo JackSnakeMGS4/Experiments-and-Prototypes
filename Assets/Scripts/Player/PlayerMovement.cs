@@ -11,16 +11,12 @@ public class PlayerMovement : MonoBehaviour
     [SerializeField] 
     private Camera p_cam;
     [SerializeField]
-    LayerMask probeMask = -1;
+    LayerMask probe_mask = -1, stair_mask = -1;
 
     [SerializeField] 
     private PhysicMaterial slope_material;
     [SerializeField] 
     private PhysicMaterial ground_material;
-    [SerializeField] 
-    private Material on_ground_material;
-    [SerializeField] 
-    private Material off_ground_material;
 
     private Rigidbody rb;
 
@@ -33,6 +29,8 @@ public class PlayerMovement : MonoBehaviour
     private float max_speed = 9f;
     [SerializeField, Range(0f, 90f)] 
     private float max_ground_angle = 25f;
+    [SerializeField, Range(0f, 90f)]
+    private float max_stairs_angle = 65f;
     [Tooltip("Determines fastest speed possible before ground snapping no longer activates.")]
     [SerializeField, Range(0f, 100f)] 
     private float max_snap_speed = 30f;
@@ -42,8 +40,15 @@ public class PlayerMovement : MonoBehaviour
     private Vector3 velocity = Vector3.zero;
     private Vector3 desired_velocity = new Vector3();
     private float min_ground_dot_product;
+    private float min_stairs_dot_product;
     private int steps_since_last_grounded;
     private Vector3 contact_normal;
+    private Vector3 steep_normal;
+    private int ground_contact_count;
+    private int steep_contact_count;
+    private bool _On_Ground => ground_contact_count > 0;
+    private bool _On_Steep => steep_contact_count > 0;
+
 
     [Header("Jumping Properties")]
     [SerializeField] 
@@ -51,7 +56,6 @@ public class PlayerMovement : MonoBehaviour
     [SerializeField] 
     private int max_air_jumps = 0;
 
-    private bool on_ground = false;
     private int jump_phase;
     private int steps_since_last_jump;
 
@@ -87,11 +91,17 @@ public class PlayerMovement : MonoBehaviour
         steps_since_last_grounded += 1;
         steps_since_last_jump += 1;
         velocity = rb.velocity;
-        if (on_ground || SnapToGround())
+        if (_On_Ground || SnapToGround() || CheckSteepContacts())
         {
             steps_since_last_grounded = 0;
-            jump_phase = 0;
-            contact_normal.Normalize();
+            if(steps_since_last_jump > 1)
+            {
+                jump_phase = 0;
+            }
+            if(ground_contact_count > 1)
+            {
+                contact_normal.Normalize();
+            }
         }
         else
         {
@@ -101,8 +111,8 @@ public class PlayerMovement : MonoBehaviour
 
     private void ClearState()
     {
-        on_ground = false;
-        contact_normal = Vector3.zero;
+        ground_contact_count = steep_contact_count = 0;
+        contact_normal = steep_normal = Vector3.zero;
     }
 
     private bool SnapToGround()
@@ -116,11 +126,11 @@ public class PlayerMovement : MonoBehaviour
         {
             return false;
         }
-        if (!Physics.Raycast(rb.position, Vector3.down, out RaycastHit hit, probe_distance, probeMask))
+        if (!Physics.Raycast(rb.position, Vector3.down, out RaycastHit hit, probe_distance, probe_mask))
         {
             return false;
         }
-        if(hit.normal.y < min_ground_dot_product)
+        if(hit.normal.y < GetMinDot(hit.collider.gameObject.layer))
         {
             return false;
         }
@@ -138,32 +148,61 @@ public class PlayerMovement : MonoBehaviour
     {
         // Determines the steepest walkable angle
         min_ground_dot_product = Mathf.Cos(max_ground_angle * Mathf.Deg2Rad);
+        // Determines the steepest walkable angle for stairs layer
+        min_stairs_dot_product = Mathf.Cos(max_stairs_angle * Mathf.Deg2Rad);
+    }
+
+    private float GetMinDot(int layer)
+    {
+        return (stair_mask & (1 << layer)) == 0 ? min_ground_dot_product : min_stairs_dot_product;
     }
 
     private void EvaluateCollision(Collision collision)
     {
+        float min_dot = GetMinDot(collision.gameObject.layer);
         for (int i = 0; i < collision.contactCount; i++)
         {
             Vector3 normal = collision.GetContact(i).normal;
             //on_ground |= normal.y >= min_ground_dot_product;
-            if (normal.y >= min_ground_dot_product)
+            if (normal.y >= min_dot)
             {
-                on_ground = true;
+                ground_contact_count += 1;
                 contact_normal += normal;
             }
+            else if(normal.y > -0.01f)
+            {
+                steep_contact_count += 1;
+                steep_normal = normal;
+            }
         }
+    }
+
+    private bool CheckSteepContacts()
+    {
+        if (steep_contact_count > 1)
+        {
+            steep_normal.Normalize();
+            if (steep_normal.y >= min_ground_dot_product)
+            {
+                ground_contact_count = 1;
+                contact_normal = steep_normal;
+                return true;
+            }
+        }
+        return false;
     }
     #endregion
 
     private void Update()
     {
-        gameObject.GetComponentInChildren<MeshRenderer>().material = on_ground ? on_ground_material : off_ground_material;
+        //gameObject.GetComponentInChildren<MeshRenderer>().material = _On_Ground ? on_ground_material : off_ground_material;
+        gameObject.GetComponentInChildren<MeshRenderer>().material.SetColor("_BaseColor", Color.white * (ground_contact_count * 0.25f));
     }
 
     public void Move(Vector2 vector)
     {
         #region Grab Player Input
-        float speed = on_ground ? movement_speed : air_movement_speed;
+        float speed = _On_Ground ? movement_speed : air_movement_speed;
         //Vector3 desired_velocity = new Vector3(vector.x, 0f, vector.y) * speed;
 
         //Previous line doesn't account for camera-based direction/velocity
@@ -192,78 +231,64 @@ public class PlayerMovement : MonoBehaviour
         //Debug.DrawLine(transform.position, transform.position + velocity * 10f, Color.blue);
         rb.velocity = velocity;
 
-        // Following is here as a fallback option
-        #region No Velocity to Angle Adjustment
-        //velocity += vector.x * GetCameraRight(p_cam) * speed;
-        //velocity += vector.y * GetCameraForward(p_cam) * speed;
-        //Debug.Log(force_direction);
-        #endregion
-
-        // Here as fallback option
-        #region Limit Max Speed
-        //Vector3 horizontal_velocity = rb.velocity;
-        //horizontal_velocity.y = 0;
-        //if(horizontal_velocity.sqrMagnitude > max_speed * max_speed)
-        //{
-        //    rb.velocity = horizontal_velocity.normalized * max_speed + Vector3.up * rb.velocity.y;
-        //}
-        #endregion
-
-        #region Jump Floatiness
-        if (rb.velocity.y < 0f)
-        {
-            rb.velocity -= Vector3.down * Physics.gravity.y * Time.deltaTime;
-        }
-        #endregion
-
-        #region Prevent Angular Spin and Slope Slide
-        Vector3 dir = rb.velocity;
-        dir.y = 0f;
-
-        if (vector.sqrMagnitude > 0.1f && dir.sqrMagnitude > 0.1f)
-        {
-            rb.rotation = Quaternion.LookRotation(dir, Vector3.up);
-            //rb.GetComponent<Collider>().material = ground_material;
-        }
-        else
-        {
-            rb.angularVelocity = Vector3.zero;
-            //rb.GetComponent<Collider>().material = slope_material;
-        }
-        #endregion
         ClearState();
     }
 
     public void Jump()
     {
-        if (on_ground || jump_phase < max_air_jumps)
+        Vector3 jump_direction;
+
+        #region Check Jump Validity
+        if (_On_Ground)
         {
-            steps_since_last_jump = 0;
-            jump_phase += 1;
-            Vector3 vel = rb.velocity;
-            float jump_speed = Mathf.Sqrt(-2f * Physics.gravity.y * jump_height);
-
-            #region Slope-based Jump
-            //float aligned_speed = Vector3.Dot(vel, contact_normal);
-            ////Debug.Log(contact_normal);
-            //if(aligned_speed > 0f)
-            //{
-            //    jump_speed = Mathf.Max(jump_speed - aligned_speed, 0f);
-            //}
-            //vel += contact_normal * jump_speed;
-            #endregion
-
-            #region Slopeless-based Jump
-            if (vel.y > 0f)
-            {
-                jump_speed = Mathf.Max(jump_speed - vel.y, 0f);
-            }
-            vel.y += jump_speed;
-            #endregion
-
-            //rb.velocity = vel;
-            rb.AddForce(vel, ForceMode.Impulse);
+            jump_direction = contact_normal;
         }
+        else if (_On_Steep)
+        {
+            jump_direction = steep_normal;
+            //Allow new jump sequence after wall touch
+            jump_phase = 0;
+        }
+        else if (max_air_jumps > 0 && jump_phase <= max_air_jumps)
+        {
+            //Prevent Extra Air Jump Bug
+            if(jump_phase == 0)
+            {
+                jump_phase = 1;
+            }
+            contact_normal = Vector3.up;
+            jump_direction = contact_normal;
+        }
+        else
+        {
+            return;
+        }
+        #endregion
+
+        steps_since_last_jump = 0;
+        jump_phase += 1;
+        float jump_speed = Mathf.Sqrt(-2f * Physics.gravity.y * jump_height);
+
+        #region Slope-based Jump
+        float aligned_speed = Vector3.Dot(velocity, jump_direction);
+        //Debug.Log(contact_normal);
+        if (aligned_speed > 0f)
+        {
+            jump_speed = Mathf.Max(jump_speed - aligned_speed, 0f);
+        }
+        velocity += jump_direction * jump_speed;
+        #endregion
+
+        #region Slopeless-based Jump
+        //if (vel.y > 0f)
+        //{
+        //    jump_speed = Mathf.Max(jump_speed - vel.y, 0f);
+        //}
+        //vel.y += jump_speed;
+        #endregion
+
+        //rb.velocity = velocity;
+        rb.AddForce(velocity, ForceMode.Impulse);
     }
 
     private void OnCollisionEnter(Collision collision)
