@@ -62,6 +62,8 @@ public class PlayerMovement : MonoBehaviour
     private int steps_since_last_jump;
 
     Vector3 up_axis;
+    Vector3 right_axis;
+    Vector3 forward_axis;
 
     private void Awake()
     {
@@ -74,6 +76,12 @@ public class PlayerMovement : MonoBehaviour
     {
         // Aligns to a direction/velocity synonymous with the angle of terrain in world space
         return vector - contact_normal * Vector3.Dot(vector, contact_normal);
+    }
+
+    private Vector3 ProjectDirectionOnPlane(Vector3 dir, Vector3 normal)
+    {
+        // Same as ProjectOnContactPlane but considers custom gravity as well
+        return (dir - normal * Vector3.Dot(dir, normal)).normalized;
     }
 
     private Vector3 GetCameraForward(Camera p_cam)
@@ -220,15 +228,20 @@ public class PlayerMovement : MonoBehaviour
 
         //Previous line doesn't account for camera-based direction/velocity
         desired_velocity = Vector3.zero;
-        desired_velocity += vector.x * GetCameraRight(p_cam) * speed;
-        desired_velocity += vector.y * GetCameraForward(p_cam) * speed;
+        //desired_velocity += vector.x * GetCameraRight(p_cam) * speed;
+        //desired_velocity += vector.y * GetCameraForward(p_cam) * speed;
+        //TODO: Debug no movement with following lines issue and camera projection issue
+        desired_velocity += vector.x * ProjectDirectionOnPlane(GetCameraRight(p_cam), up_axis) * speed;
+        desired_velocity += vector.y * ProjectDirectionOnPlane(GetCameraForward(p_cam), up_axis) * speed;
         #endregion
 
         UpdateState();
 
         #region Set Velocity Based Off Terrain Slope
-        Vector3 x_axis = ProjectOnContactPlane(Vector3.right).normalized;
-        Vector3 z_axis = ProjectOnContactPlane(Vector3.forward).normalized;
+        //Vector3 x_axis = ProjectOnContactPlane(Vector3.right).normalized;
+        //Vector3 z_axis = ProjectOnContactPlane(Vector3.forward).normalized;
+        Vector3 x_axis = ProjectDirectionOnPlane(right_axis, contact_normal);
+        Vector3 z_axis = ProjectDirectionOnPlane(forward_axis, contact_normal);
 
         float current_x = Vector3.Dot(velocity, x_axis);
         float current_z = Vector3.Dot(velocity, z_axis);
